@@ -1,0 +1,5 @@
+Lesmarl AI
+
+Made by Mashrur Ahmed Arib.
+
+This project is a privacy-aware AI chat experience built with Flask and OpenRouter.
