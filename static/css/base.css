@@ -1,0 +1,62 @@
+/* Lesmarl AI - Made by Mashrur Ahmed Arib - MIT License. See LICENSE. */
+html {
+  color-scheme: dark;
+}
+
+html[data-theme="light"] {
+  color-scheme: light;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  min-height: 100%;
+  background: linear-gradient(180deg, var(--color-surface-0), var(--color-surface-1));
+  color: var(--color-text-primary);
+  font-family: var(--font-ui);
+}
+
+body {
+  font-size: var(--type-md);
+  line-height: 1.5;
+  transition: background var(--duration-base) var(--ease-standard), color var(--duration-base) var(--ease-standard);
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button, input, textarea, select {
+  font: inherit;
+}
+
+img, svg {
+  display: block;
+  max-width: 100%;
+}
+
+button {
+  cursor: pointer;
+  border: 1px solid transparent;
+  background: transparent;
+}
+
+textarea {
+  resize: none;
+}
+
+pre, code {
+  font-family: var(--font-mono);
+}
+
+p, h1, h2, h3, h4, h5, h6 {
+  margin: 0;
+}
