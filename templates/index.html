@@ -1,0 +1,146 @@
+<!-- Lesmarl AI - Made by Mashrur Ahmed Arib - MIT License. See LICENSE. -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="author" content="Mashrur Ahmed Arib">
+  <title>Lesmarl AI</title>
+  <meta name="description" content="Lesmarl AI is a polished AI chat app powered by OpenRouter.">
+  <link rel="stylesheet" href="/static/css/tokens.css">
+  <link rel="stylesheet" href="/static/css/base.css">
+  <link rel="stylesheet" href="/static/css/components.css">
+</head>
+<body data-theme="dark">
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="Chat sidebar">
+      <div class="sidebar__header">
+        <div class="brand" aria-label="Lesmarl AI home">
+          <span class="brand__mark" aria-hidden="true">
+            <svg viewBox="0 0 64 64" role="img" aria-hidden="true">
+              <defs>
+                <linearGradient id="brandGradient" x1="0%" x2="100%" y1="0%" y2="100%">
+                  <stop offset="0%" stop-color="#74c0fc"/>
+                  <stop offset="50%" stop-color="#a78bfa"/>
+                  <stop offset="100%" stop-color="#34d399"/>
+                </linearGradient>
+              </defs>
+              <rect x="8" y="8" width="48" height="48" rx="14" fill="rgba(255,255,255,0.06)"/>
+              <path d="M22 42V22h7.5c6.5 0 10.5 3.7 10.5 9.5S35.9 42 29.5 42H22zm8.5-5.5c3.3 0 5.3-1.3 5.3-4.1 0-2.7-2-4.1-5.3-4.1H28v8.2h2.5z" fill="url(#brandGradient)"/>
+              <path d="M36 22h7v20h-7z" fill="url(#brandGradient)"/>
+            </svg>
+          </span>
+          <div>
+            <strong>Lesmarl AI</strong>
+            <small>OpenRouter chat</small>
+          </div>
+        </div>
+        <button class="icon-button" type="button" aria-label="New chat">+</button>
+      </div>
+
+      <div class="sidebar__filters">
+        <label class="search-field">
+          <span>Search</span>
+          <input id="chat-search" type="search" placeholder="Find chats..." aria-label="Search chats">
+        </label>
+      </div>
+
+      <div class="sidebar__section">
+        <div class="section-heading">Conversations</div>
+        <div id="chat-list" class="chat-list" aria-live="polite"></div>
+      </div>
+
+      <div class="sidebar__section sidebar__section--bottom">
+        <button class="secondary-button" type="button" id="open-settings">Settings</button>
+      </div>
+    </aside>
+
+    <main class="workspace" aria-label="Conversation workspace">
+      <header class="topbar">
+        <div class="topbar__meta">
+          <div class="status-pill status-pill--live">
+            <span class="status-dot"></span>
+            Free model route
+          </div>
+        </div>
+        <div class="toolbar">
+          <button class="icon-button" type="button" id="toggle-theme" aria-label="Toggle theme">☼</button>
+          <button class="icon-button" type="button" id="open-commands" aria-label="Open command palette">⌘K</button>
+        </div>
+      </header>
+
+      <section class="chat-panel">
+        <div id="empty-state" class="empty-state">
+          <div class="empty-state__welcome">
+            <div class="brand-lockup">
+              <span class="brand__mark brand__mark--large" aria-hidden="true">
+                <svg viewBox="0 0 64 64" role="img" aria-hidden="true">
+                  <defs>
+                    <linearGradient id="heroGradient" x1="0%" x2="100%" y1="0%" y2="100%">
+                      <stop offset="0%" stop-color="#74c0fc"/>
+                      <stop offset="50%" stop-color="#a78bfa"/>
+                      <stop offset="100%" stop-color="#34d399"/>
+                    </linearGradient>
+                  </defs>
+                  <rect x="8" y="8" width="48" height="48" rx="14" fill="rgba(255,255,255,0.06)"/>
+                  <path d="M22 42V22h7.5c6.5 0 10.5 3.7 10.5 9.5S35.9 42 29.5 42H22zm8.5-5.5c3.3 0 5.3-1.3 5.3-4.1 0-2.7-2-4.1-5.3-4.1H28v8.2h2.5z" fill="url(#heroGradient)"/>
+                  <path d="M36 22h7v20h-7z" fill="url(#heroGradient)"/>
+                </svg>
+              </span>
+              <h1>Lesmarl AI</h1>
+            </div>
+            <p>Ask anything, draft faster, and keep the context in one place.</p>
+          </div>
+
+          <div class="mode-strip" id="mode-strip" aria-label="Assistant modes">
+            <button class="mode-card is-selected" type="button" data-mode="general"><span>General</span><small>Balanced helper</small></button>
+            <button class="mode-card" type="button" data-mode="code"><span>Code</span><small>Developer mode</small></button>
+            <button class="mode-card" type="button" data-mode="writer"><span>Writer</span><small>Ideas & copy</small></button>
+            <button class="mode-card" type="button" data-mode="study"><span>Study</span><small>Socratic tutor</small></button>
+          </div>
+
+          <div class="prompt-grid" id="prompt-grid">
+            <button class="prompt-card" type="button">Build a landing page brief</button>
+            <button class="prompt-card" type="button">Summarize this article</button>
+            <button class="prompt-card" type="button">Fix this JavaScript bug</button>
+            <button class="prompt-card" type="button">Create a 7-day study plan</button>
+            <button class="prompt-card" type="button">Draft a sales email</button>
+            <button class="prompt-card" type="button">Plan a product launch checklist</button>
+          </div>
+        </div>
+
+        <div id="messages" class="messages" aria-live="polite"></div>
+      </section>
+
+      <form id="composer" class="composer" autocomplete="off">
+        <div class="composer__attachments" id="attachment-list" aria-label="Attached files"></div>
+        <label class="composer__label" for="prompt-input">Prompt</label>
+        <textarea id="prompt-input" rows="1" placeholder="Ask Lesmarl AI..." aria-label="Prompt input"></textarea>
+        <div class="composer__actions">
+          <div class="utility-buttons">
+            <button class="ghost-button" type="button" id="attach-file" aria-label="Attach file">Attach</button>
+            <button class="ghost-button" type="button" id="toggle-voice" aria-label="Voice input">Voice</button>
+            <button class="ghost-button" type="button" id="enhance-prompt" aria-label="Enhance prompt">Enhance</button>
+          </div>
+          <div class="send-row">
+            <button class="secondary-button" type="button" id="stop-button" hidden>Stop</button>
+            <button class="primary-button" type="submit" id="send-button">Send</button>
+          </div>
+        </div>
+      </form>
+    </main>
+  </div>
+
+  <footer class="site-footer">
+    <a href="/about">Made by Mashrur Ahmed Arib</a>
+  </footer>
+
+  <script src="/static/js/i18n.js"></script>
+  <script src="/static/js/storage.js"></script>
+  <script src="/static/js/markdown.js"></script>
+  <script src="/static/js/highlight.js"></script>
+  <script src="/static/js/ui.js"></script>
+  <script src="/static/js/chat.js"></script>
+  <script src="/static/js/app.js"></script>
+</body>
+</html>
