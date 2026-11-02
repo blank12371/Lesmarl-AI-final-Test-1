@@ -5,6 +5,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const textarea = document.getElementById('prompt-input');
   window.LesmarlUI.bindTextareaAutoGrow(textarea);
+  bindVoiceInput(textarea);
 
   constantButtons();
   document.getElementById('toggle-theme').addEventListener('click', () => {
@@ -52,6 +53,78 @@ document.addEventListener('DOMContentLoaded', () => {
     input.multiple = true;
     input.click();
   });
+
+  function bindVoiceInput(input) {
+    const button = document.getElementById('toggle-voice');
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      button.title = 'Voice input is not supported in this browser.';
+      button.addEventListener('click', () => {
+        window.alert('Voice input is not supported in this browser. Try a current version of Chrome or Edge.');
+      });
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.lang = navigator.language || 'en-US';
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    let finalTranscript = '';
+    let startingText = '';
+    let isListening = false;
+
+    button.addEventListener('click', () => {
+      if (isListening) {
+        recognition.stop();
+        return;
+      }
+      finalTranscript = '';
+      startingText = input.value;
+      try {
+        recognition.start();
+      } catch (error) {
+        window.alert('Voice input could not start. Check microphone permission and try again.');
+      }
+    });
+
+    recognition.addEventListener('start', () => {
+      isListening = true;
+      button.textContent = 'Listening...';
+      button.setAttribute('aria-pressed', 'true');
+      button.title = 'Click to stop voice input.';
+    });
+
+    recognition.addEventListener('result', (event) => {
+      let interimTranscript = '';
+      for (let index = event.resultIndex; index < event.results.length; index += 1) {
+        const transcript = event.results[index][0].transcript;
+        if (event.results[index].isFinal) {
+          finalTranscript += transcript;
+        } else {
+          interimTranscript += transcript;
+        }
+      }
+      const baseText = startingText.trimEnd();
+      const separator = baseText && !/\s$/.test(startingText) ? ' ' : '';
+      input.value = baseText + separator + finalTranscript + interimTranscript;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    recognition.addEventListener('error', (event) => {
+      if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+        window.alert('Microphone access was blocked. Allow microphone access for this site in your browser settings.');
+      } else if (event.error !== 'no-speech' && event.error !== 'aborted') {
+        window.alert('Voice input encountered an error. Check your microphone and try again.');
+      }
+    });
+
+    recognition.addEventListener('end', () => {
+      isListening = false;
+      button.textContent = 'Voice';
+      button.setAttribute('aria-pressed', 'false');
+      button.title = 'Start voice input.';
+    });
+  }
 
   function constantButtons() {
     document.querySelectorAll('.prompt-card, .mode-card, .icon-button, .ghost-button, .primary-button, .secondary-button').forEach((button) => {
