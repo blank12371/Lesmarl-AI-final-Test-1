@@ -12,7 +12,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const attachments = [];
   const allowedFileExtensions = /\.(txt|md|csv|json|js|ts|py|html|css|sql|sh|yaml|yml|xml|toml|java|c|cpp|h|go|rs)$/i;
   const maxFileBytes = 200 * 1024;
-  const maxTotalAttachmentBytes = 140 * 1024;
+  const maxTotalAttachmentBytes = 120 * 1024;
 
   initializeAccount();
   document.getElementById('new-chat').addEventListener('click', startNewChat);
@@ -127,11 +127,15 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       const currentTotal = attachments.reduce((total, attachment) => total + attachment.size, 0);
       if (currentTotal + file.size > maxTotalAttachmentBytes) {
-        window.alert('Attachments are limited to 140 KB total per message to fit the server request limit.');
+        window.alert('Attachments are limited to 120 KB total per message so the model can process the request reliably.');
         break;
       }
       try {
         const content = await file.text();
+        if (content.length > 18_000) {
+          window.alert(`${file.name}: keep attached text files under about 18 KB each for reliable AI responses.`);
+          continue;
+        }
         attachments.push({ id: crypto.randomUUID(), name: file.name, size: file.size, content });
         renderAttachments();
       } catch (error) {

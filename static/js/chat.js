@@ -21,8 +21,9 @@ window.LesmarlChat = (() => {
     const controller = new AbortController();
     activeStream = controller;
     const messages = [{ role: 'user', content: prompt || 'Please review the attached files.' }];
+    const attachmentChunkSize = 12_000;
     attachments.forEach((file) => {
-      const chunks = file.content.match(/[\s\S]{1,18000}/g) || [''];
+      const chunks = file.content.match(new RegExp(`.{1,${attachmentChunkSize}}`, 's')) || [''];
       chunks.forEach((chunk, index) => {
         const chunkLabel = chunks.length > 1 ? ` (part ${index + 1}/${chunks.length})` : '';
         messages.push({ role: 'user', content: `Attached file: ${file.name}${chunkLabel}\n\n${chunk}` });
