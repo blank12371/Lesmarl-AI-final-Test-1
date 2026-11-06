@@ -12,6 +12,8 @@ services:
         value: 3.11
       - key: OPENROUTER_API_KEY
         sync: false
+      - key: SESSION_SECRET
+        generateValue: true
       - key: DEFAULT_MODEL
         value: meta-llama/llama-3.1-8b-instruct:free
       - key: FALLBACK_MODELS

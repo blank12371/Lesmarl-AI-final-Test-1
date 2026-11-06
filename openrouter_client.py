@@ -87,6 +87,40 @@ class OpenRouterClient:
         self._model_cache_time = now
         return payload
 
+    def enhance_prompt(self, prompt: str, model: Optional[str] = None) -> str:
+        if not self.api_key:
+            raise RuntimeError("OpenRouter API is not configured.")
+        selected_model = model or os.getenv("DEFAULT_MODEL", "").strip()
+        if not selected_model:
+            raise RuntimeError("No default model is configured.")
+        response = requests.post(
+            f"{self.base_url}/chat/completions",
+            headers=self._headers(),
+            json={
+                "model": selected_model,
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": "Rewrite the user's prompt to make it clearer, more specific, and well-structured. Preserve the user's intent and facts. Return only the revised prompt; do not answer it.",
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                "temperature": 0.3,
+                "max_tokens": 700,
+                "stream": False,
+            },
+            timeout=30,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        choices = payload.get("choices", [])
+        if not choices:
+            raise ValueError("The model returned no enhanced prompt.")
+        content = choices[0].get("message", {}).get("content")
+        if not isinstance(content, str) or not content.strip():
+            raise ValueError("The model returned no enhanced prompt.")
+        return content.strip()
+
     def stream_chat(self, messages: List[Dict[str, str]], model: Optional[str] = None, temperature: float = 0.7, max_tokens: int = 512, fallback_models: Optional[List[str]] = None):
         if not self.api_key:
             raise RuntimeError("OpenRouter API key is not configured.")
@@ -129,6 +163,7 @@ class OpenRouterClient:
                         continue
                     raise requests.HTTPError(f"OpenRouter error {response.status_code}")
                 response.raise_for_status()
+                response.encoding = "utf-8"
                 start = time.time()
                 first_token_ms = None
                 text_buffer = ""

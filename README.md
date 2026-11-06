@@ -89,12 +89,20 @@ Then visit http://localhost:5000.
 | Name | Description | Example |
 | --- | --- | --- |
 | OPENROUTER_API_KEY | Secret API key from OpenRouter | `sk-or-...` |
+| SESSION_SECRET | Secret used to sign login sessions | Generate a long random value |
+| DATABASE_PATH | SQLite file path for account records | `lesmarl.sqlite3` |
 | DEFAULT_MODEL | Preferred free model | `meta-llama/llama-3.1-8b-instruct:free` |
 | FALLBACK_MODELS | Comma-separated fallback models | `google/gemma-3-4b-it:free,mistralai/mistral-7b-instruct:free` |
 | SITE_URL | Public URL used as HTTP-Referer | `https://example.com` |
 | PORT | Flask port for local runs | `5000` |
 | PYTHON_VERSION | Runtime version | `3.11` |
 | RATE_LIMIT | Request rate limit | `60/minute` |
+
+## Accounts and data persistence
+
+Users can create an account with a name and password, sign in, and sign out. Passwords are stored as salted PBKDF2 hashes; the original password is never stored. Set `SESSION_SECRET` to a long, random secret in production so sessions remain valid across restarts. The SQLite database is controlled by `DATABASE_PATH`.
+
+Render free instances have an ephemeral filesystem. With the default SQLite setup, account records can be lost when the service restarts or redeploys. Use a persistent disk or a managed database for accounts that must survive deployments. This basic account system has no email verification or password-reset flow.
 
 ## API reference
 
