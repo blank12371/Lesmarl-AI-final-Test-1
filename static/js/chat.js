@@ -17,18 +17,30 @@ window.LesmarlChat = (() => {
     wrapper.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
 
-  async function streamPrompt(prompt) {
+  async function streamPrompt(prompt, attachments = []) {
     const controller = new AbortController();
     activeStream = controller;
+    const messages = [{ role: 'user', content: prompt || 'Please review the attached files.' }];
+    attachments.forEach((file) => {
+      const chunks = file.content.match(/[\s\S]{1,18000}/g) || [''];
+      chunks.forEach((chunk, index) => {
+        const chunkLabel = chunks.length > 1 ? ` (part ${index + 1}/${chunks.length})` : '';
+        messages.push({ role: 'user', content: `Attached file: ${file.name}${chunkLabel}\n\n${chunk}` });
+      });
+    });
+    const requestBody = JSON.stringify({
+      model: localStorage.getItem('lesmarl-default-model') || null,
+      messages,
+      temperature: 0.7,
+      max_tokens: 512
+    });
+    if (new TextEncoder().encode(requestBody).length > 180 * 1024) {
+      throw new Error('The prompt and attachments exceed the request size limit. Remove a file and try again.');
+    }
     const response = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
-      body: JSON.stringify({
-        model: null,
-        messages: [{ role: 'user', content: prompt }],
-        temperature: 0.7,
-        max_tokens: 512
-      }),
+      body: requestBody,
       signal: controller.signal
     });
 
