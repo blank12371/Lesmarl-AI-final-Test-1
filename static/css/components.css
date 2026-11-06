@@ -165,6 +165,7 @@
 .workspace {
   display: flex;
   flex-direction: column;
+  min-width: 0;
   min-height: 0;
   border-radius: var(--radius-3);
   overflow: hidden;
@@ -198,6 +199,7 @@
 
 .chat-panel {
   flex: 1;
+  min-width: 0;
   padding: var(--spacing-5);
   overflow: auto;
 }
@@ -257,9 +259,11 @@
 .messages {
   display: grid;
   gap: var(--spacing-4);
+  min-width: 0;
 }
 
 .message {
+  min-width: 0;
   border-radius: var(--radius-2);
   padding: var(--spacing-4);
   background: rgba(255,255,255,0.02);
@@ -281,14 +285,19 @@
 }
 
 .message__content {
+  min-width: 0;
   font-size: var(--type-md);
   line-height: 1.7;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .message__content h1, .message__content h2, .message__content h3,
 .message__content p, .message__content ul, .message__content ol, .message__content table,
 .message__content blockquote, .message__content pre {
   margin-bottom: var(--spacing-3);
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .message__content a {
