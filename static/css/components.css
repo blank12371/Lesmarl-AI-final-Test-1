@@ -260,9 +260,12 @@
   display: grid;
   gap: var(--spacing-4);
   min-width: 0;
+  width: 100%;
 }
 
 .message {
+  width: 100%;
+  max-width: 100%;
   min-width: 0;
   border-radius: var(--radius-2);
   padding: var(--spacing-4);
@@ -285,6 +288,7 @@
 }
 
 .message__content {
+  width: 100%;
   min-width: 0;
   font-size: var(--type-md);
   line-height: 1.7;
