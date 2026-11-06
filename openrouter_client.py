@@ -166,7 +166,7 @@ class OpenRouterClient:
                 response.encoding = "utf-8"
                 start = time.time()
                 first_token_ms = None
-                text_buffer = ""
+                received_content = False
                 for line in response.iter_lines(decode_unicode=True):
                     if not line:
                         continue
@@ -184,10 +184,15 @@ class OpenRouterClient:
                         delta = choices[0].get("delta", {})
                         token = delta.get("content") or ""
                         if token:
+                            received_content = True
                             if first_token_ms is None:
                                 first_token_ms = int((time.time() - start) * 1000)
-                            text_buffer += token
                             yield {"event": "token", "text": token}
+                if not received_content:
+                    if index < len(candidates) - 1:
+                        fallback_used = True
+                        continue
+                    raise RuntimeError("OpenRouter returned no content for this request. Try again or switch models.")
                 usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
                 yield {"event": "done", "usage": usage, "model": candidate, "ms_first_token": first_token_ms or 0, "ms_total": int((time.time() - start) * 1000)}
                 return
