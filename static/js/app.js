@@ -16,6 +16,10 @@ document.addEventListener('DOMContentLoaded', () => {
   const chatSearch = document.getElementById('chat-search');
   const chatList = document.getElementById('chat-list');
   let conversations = loadConversations();
+  let nextChatNumber = conversations.reduce((next, conversation) => {
+    const match = /^Chat (\d+)$/.exec(conversation.title);
+    return match ? Math.max(next, Number(match[1]) + 1) : next;
+  }, 1);
   let activeConversationId = null;
   let currentMode = 'general';
 
@@ -326,8 +330,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function startNewChat() {
     window.LesmarlChat.stop();
-    activeConversationId = null;
-    currentMode = 'general';
+    const activeConversation = conversations.find((item) => item.id === activeConversationId);
+    if (!activeConversation || activeConversation.messages.length) {
+      currentMode = 'general';
+      createConversation();
+    } else {
+      currentMode = activeConversation.mode || currentMode;
+    }
     window.LesmarlUI.setModeSelection(currentMode);
     attachments.splice(0);
     renderAttachments();
@@ -342,15 +351,29 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function loadConversations() {
     try {
-      const stored = JSON.parse(sessionStorage.getItem('lesmarl-chat-history') || '[]');
-      return Array.isArray(stored) ? stored.filter((item) => item && typeof item.id === 'string' && Array.isArray(item.messages)) : [];
+      const currentHistory = localStorage.getItem('lesmarl-chat-history');
+      const legacyHistory = sessionStorage.getItem('lesmarl-chat-history');
+      const stored = JSON.parse(currentHistory || legacyHistory || '[]');
+      if (!Array.isArray(stored)) return [];
+      const loaded = stored
+        .filter((item) => item && typeof item.id === 'string' && Array.isArray(item.messages))
+        .slice(-20)
+        .map((item, index) => ({
+          ...item,
+          title: /^Chat \d+$/.test(item.title || '') ? item.title : `Chat ${index + 1}`,
+          createdAt: item.createdAt || item.updatedAt || Date.now()
+        }));
+      localStorage.setItem('lesmarl-chat-history', JSON.stringify(loaded));
+      sessionStorage.removeItem('lesmarl-chat-history');
+      return loaded;
     } catch {
       return [];
     }
   }
 
   function saveConversations() {
-    const stored = conversations.slice(-10).map((conversation) => ({
+    conversations = conversations.slice(-20);
+    const stored = conversations.map((conversation) => ({
       ...conversation,
       messages: conversation.messages.slice(-20).map((message) => ({
         role: message.role,
@@ -359,24 +382,29 @@ document.addEventListener('DOMContentLoaded', () => {
       }))
     }));
     try {
-      sessionStorage.setItem('lesmarl-chat-history', JSON.stringify(stored));
+      localStorage.setItem('lesmarl-chat-history', JSON.stringify(stored));
     } catch {}
   }
 
   function ensureConversation(prompt, submittedAttachments) {
     let conversation = conversations.find((item) => item.id === activeConversationId);
-    if (!conversation) {
-      const title = prompt || submittedAttachments[0]?.name || 'New chat';
-      conversation = {
-        id: crypto.randomUUID(),
-        title: title.slice(0, 64),
-        mode: currentMode,
-        messages: [],
-        updatedAt: Date.now()
-      };
-      conversations.push(conversation);
-      activeConversationId = conversation.id;
-    }
+    if (!conversation) conversation = createConversation();
+    return conversation;
+  }
+
+  function createConversation() {
+    const conversation = {
+      id: crypto.randomUUID(),
+      title: `Chat ${nextChatNumber++}`,
+      mode: currentMode,
+      messages: [],
+      createdAt: Date.now(),
+      updatedAt: Date.now()
+    };
+    conversations.push(conversation);
+    activeConversationId = conversation.id;
+    saveConversations();
+    renderConversationList();
     return conversation;
   }
 
@@ -418,6 +446,8 @@ document.addEventListener('DOMContentLoaded', () => {
     activeConversationId = id;
     currentMode = conversation.mode || 'general';
     window.LesmarlUI.setModeSelection(currentMode);
+    attachments.splice(0);
+    renderAttachments();
     document.getElementById('messages').replaceChildren();
     document.getElementById('empty-state').hidden = true;
     conversation.messages.forEach((message) => window.LesmarlChat.renderMessage(message.role, message.content, message.meta));
