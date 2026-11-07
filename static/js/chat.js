@@ -17,10 +17,20 @@ window.LesmarlChat = (() => {
     wrapper.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
 
-  async function streamPrompt(prompt, attachments = []) {
+  async function streamPrompt(prompt, attachments = [], mode = 'general', history = []) {
     const controller = new AbortController();
     activeStream = controller;
-    const messages = [{ role: 'user', content: prompt || 'Please review the attached files.' }];
+    const modeInstructions = {
+      general: 'Be a clear, balanced, helpful assistant. Answer directly and organize longer replies.',
+      code: 'Act as a careful software engineering assistant. Explain assumptions, provide correct code, and point out important edge cases.',
+      writer: 'Act as a writing partner. Match the requested audience and tone, and produce polished, original writing.',
+      study: 'Act as a patient tutor. Explain ideas step by step, check understanding, and guide the learner instead of merely giving answers.'
+    };
+    const messages = [
+      { role: 'system', content: modeInstructions[mode] || modeInstructions.general },
+      ...history.slice(-20),
+      { role: 'user', content: prompt || 'Please review the attached files.' }
+    ];
     const attachmentChunkSize = 12_000;
     attachments.forEach((file) => {
       const chunks = file.content.match(new RegExp(`[\\s\\S]{1,${attachmentChunkSize}}`, 'g')) || [''];
@@ -67,45 +77,54 @@ window.LesmarlChat = (() => {
     `;
     document.getElementById('messages').appendChild(message.node);
 
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const parts = buffer.split('\n\n');
-      buffer = parts.pop() || '';
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split('\n\n');
+        buffer = parts.pop() || '';
 
-      for (const part of parts) {
-        if (!part.trim()) continue;
-        const eventLine = part.match(/^event:\s*(.+)$/m);
-        const dataLine = part.match(/^data:\s*(.*)$/m);
-        if (!eventLine || !dataLine) continue;
-        const event = eventLine[1].trim();
-        const text = dataLine[1];
-        if (event === 'meta') {
-          const meta = JSON.parse(text);
-          message.node.querySelector('.message__header span').textContent = meta.model || 'model';
-        } else if (event === 'token') {
-          const token = JSON.parse(text).text || '';
-          currentText += token;
-          const contentNode = message.node.querySelector('.message__content');
-          contentNode.innerHTML = window.LesmarlMarkdown.render(currentText);
-        } else if (event === 'done') {
-          const doneMeta = JSON.parse(text);
-          const modelLabel = doneMeta.model || 'complete';
-          message.node.querySelector('.message__header span').textContent = modelLabel;
-          if (doneMeta.truncated) {
+        for (const part of parts) {
+          if (!part.trim()) continue;
+          const eventLine = part.match(/^event:\s*(.+)$/m);
+          const dataLine = part.match(/^data:\s*(.*)$/m);
+          if (!eventLine || !dataLine) continue;
+          const event = eventLine[1].trim();
+          const text = dataLine[1];
+          if (event === 'meta') {
+            const meta = JSON.parse(text);
+            message.node.querySelector('.message__header span').textContent = meta.model || 'model';
+          } else if (event === 'token') {
+            const token = JSON.parse(text).text || '';
+            currentText += token;
             const contentNode = message.node.querySelector('.message__content');
-            contentNode.insertAdjacentHTML('beforeend', '<p class="response-warning">This response reached the model output limit. Ask to continue for the rest.</p>');
+            contentNode.innerHTML = window.LesmarlMarkdown.render(currentText);
+          } else if (event === 'done') {
+            const doneMeta = JSON.parse(text);
+            const modelLabel = doneMeta.model || 'complete';
+            message.node.querySelector('.message__header span').textContent = modelLabel;
+            if (doneMeta.truncated) {
+              const contentNode = message.node.querySelector('.message__content');
+              contentNode.insertAdjacentHTML('beforeend', '<p class="response-warning">This response reached the model output limit. Ask to continue for the rest.</p>');
+            }
+          } else if (event === 'error') {
+            const err = JSON.parse(text);
+            throw new Error(err.message || 'Unable to complete the request.');
           }
-        } else if (event === 'error') {
-          const err = JSON.parse(text);
-          const contentNode = message.node.querySelector('.message__content');
-          contentNode.innerHTML = `<p class="error-box">${window.LesmarlMarkdown.escapeHtml(err.message || 'Unable to complete the request.')}</p>`;
         }
       }
+    } catch (error) {
+      if (controller.signal.aborted) {
+        message.node.querySelector('.message__header span').textContent = 'Stopped';
+        return currentText;
+      }
+      message.node.remove();
+      throw error;
+    } finally {
+      if (activeStream === controller) activeStream = null;
     }
 
-    activeStream = null;
     return currentText;
   }
 

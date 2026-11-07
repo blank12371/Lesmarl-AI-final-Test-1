@@ -160,6 +160,17 @@
   border-radius: var(--radius-2);
   background: rgba(255,255,255,0.02);
   color: var(--color-text-primary);
+  overflow-wrap: anywhere;
+}
+
+.chat-item.is-active {
+  border-color: var(--color-accent-1);
+  background: rgba(116, 192, 252, 0.1);
+}
+
+.chat-list-empty {
+  color: var(--color-text-muted);
+  font-size: var(--type-sm);
 }
 
 .workspace {

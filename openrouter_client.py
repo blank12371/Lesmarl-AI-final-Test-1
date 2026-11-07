@@ -51,7 +51,7 @@ class OpenRouterClient:
                 if not isinstance(item, dict):
                     continue
                 price = item.get("pricing") or {}
-                if not isinstance(price, dict):
+                if not isinstance(price, dict) or "prompt" not in price or "completion" not in price:
                     continue
                 try:
                     prompt = float(price.get("prompt", 0) or 0)
@@ -60,7 +60,18 @@ class OpenRouterClient:
                     continue
                 if prompt > 0 or completion > 0:
                     continue
+                architecture = item.get("architecture") or {}
+                if not isinstance(architecture, dict):
+                    continue
+                input_modalities = architecture.get("input_modalities") or []
+                output_modalities = architecture.get("output_modalities") or []
+                if not isinstance(input_modalities, list) or not isinstance(output_modalities, list):
+                    continue
+                if "text" not in input_modalities or output_modalities != ["text"]:
+                    continue
                 model_id = item.get("id")
+                if not isinstance(model_id, str) or not model_id:
+                    continue
                 name = item.get("name") or model_id or "Unnamed model"
                 context = int(item.get("context_length") or 0)
                 description = item.get("description") or "OpenRouter free model"
@@ -72,8 +83,11 @@ class OpenRouterClient:
                 })
             filtered = sorted(filtered, key=lambda item: (item.get("context_length") or 0, item.get("id") or ""), reverse=True)
             default_id = os.getenv("DEFAULT_MODEL", "").strip()
-            if not default_id and filtered:
+            available_ids = {item["id"] for item in filtered}
+            if default_id not in available_ids and filtered:
                 default_id = filtered[0].get("id", "")
+            elif not filtered:
+                default_id = ""
             payload["models"] = filtered
             payload["default"] = default_id
             self._model_cache = payload

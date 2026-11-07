@@ -24,11 +24,6 @@ MAX_MESSAGE_CHARS = 20_000
 MAX_BODY_BYTES = 200 * 1024
 MAX_COMPLETION_TOKENS = 4096
 PASSWORD_ITERATIONS = 310_000
-FEATURED_MODELS = (
-    {"id": "google/gemini-pro-1.5", "name": "Gemini 1.5 Pro (legacy; availability may vary)", "context_length": 0, "description": "Legacy model ID from the provided list; check OpenRouter availability and pricing."},
-    {"id": "meta-llama/llama-3.1-70b-instruct:free", "name": "Llama 3.1 70B Instruct (free; availability may vary)", "context_length": 0, "description": "Free-tier model ID from the provided list; check OpenRouter availability."},
-    {"id": "deepseek/deepseek-chat", "name": "DeepSeek V3 (pricing may vary)", "context_length": 0, "description": "Model ID from the provided list; check OpenRouter availability and pricing."},
-)
 
 
 def json_error(code, message, extra=None):
@@ -40,6 +35,7 @@ def json_error(code, message, extra=None):
 
 def create_app():
     config = AppConfig()
+    openrouter_client = OpenRouterClient(api_key=config.api_key, site_url=config.site_url)
     app = Flask(__name__, template_folder="templates", static_folder="static")
     app.secret_key = os.getenv("SESSION_SECRET") or secrets.token_hex(32)
     app.config["JSON_SORT_KEYS"] = False
@@ -143,16 +139,15 @@ def create_app():
     @limiter.limit("30/minute")
     def api_models():
         current_config = AppConfig()
-        client = OpenRouterClient(api_key=current_config.api_key, site_url=current_config.site_url)
-        response = client.get_public_models()
+        response = openrouter_client.get_public_models()
         models = response.get("models", [])
-        known_ids = {item.get("id") for item in models if isinstance(item, dict)}
-        response["models"] = models + [item for item in FEATURED_MODELS if item["id"] not in known_ids]
+        available_ids = {item.get("id") for item in models if isinstance(item, dict)}
         default_value = current_config.default_model
-        if default_value and response.get("default"):
-            response["default"] = response["default"] or default_value
-        elif default_value:
-            response["default"] = default_value
+        if default_value not in available_ids:
+            default_value = response.get("default")
+        if default_value not in available_ids:
+            default_value = models[0]["id"] if models else ""
+        response["default"] = default_value
         return jsonify(response)
 
     @app.route("/api/auth/me")
@@ -263,9 +258,20 @@ def create_app():
         if model is not None and (not isinstance(model, str) or not model.strip()):
             return json_error(400, "The model must be a non-empty string or null.")
 
-        client = OpenRouterClient(api_key=current_config.api_key, site_url=current_config.site_url)
+        client = openrouter_client
+        model_data = client.get_public_models()
+        available_ids = {item.get("id") for item in model_data.get("models", []) if isinstance(item, dict)}
+        selected_model = model.strip() if isinstance(model, str) else current_config.default_model
+        if selected_model not in available_ids:
+            if isinstance(model, str):
+                return json_error(400, "That model is unavailable or not free for text chat. Choose a current free model in Settings.")
+            selected_model = model_data.get("default")
+        if selected_model not in available_ids:
+            selected_model = next((item.get("id") for item in model_data.get("models", []) if item.get("id") in available_ids), None)
+        if not selected_model:
+            return json_error(503, "No free text-chat models are currently available. Try again later.")
         try:
-            enhanced = client.enhance_prompt(prompt, model.strip() if model else current_config.default_model)
+            enhanced = client.enhance_prompt(prompt, selected_model)
         except requests.Timeout:
             return json_error(504, "Prompt enhancement timed out. Try again.")
         except requests.RequestException as exc:
@@ -339,8 +345,19 @@ def create_app():
         if not 1 <= max_tokens <= 8192:
             return json_error(400, "Max tokens must be between 1 and 8192.")
 
+        client = openrouter_client
+        model_data = client.get_public_models()
+        available_ids = {item.get("id") for item in model_data.get("models", []) if isinstance(item, dict)}
         selected_model = model.strip() if isinstance(model, str) else current_config.default_model
-        client = OpenRouterClient(api_key=current_config.api_key, site_url=current_config.site_url)
+        if selected_model not in available_ids:
+            if isinstance(model, str):
+                return json_error(400, "That model is unavailable or not free for text chat. Choose a current free model in Settings.")
+            selected_model = model_data.get("default")
+        if selected_model not in available_ids:
+            selected_model = next((item.get("id") for item in model_data.get("models", []) if item.get("id") in available_ids), None)
+        if not selected_model:
+            return json_error(503, "No free text-chat models are currently available. Try again later.")
+        free_fallback_models = [model_id for model_id in current_config.fallback_models if model_id in available_ids]
 
         def event_stream():
             yield "event: meta\ndata: {\"model\": \"%s\", \"fallback_used\": false}\n\n" % (selected_model or current_config.default_model)
@@ -350,7 +367,7 @@ def create_app():
                     model=selected_model,
                     temperature=temperature,
                     max_tokens=max_tokens,
-                    fallback_models=current_config.fallback_models,
+                    fallback_models=free_fallback_models,
                 ):
                     if isinstance(item, dict):
                         event_name = item.get("event")

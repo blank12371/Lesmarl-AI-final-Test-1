@@ -29,10 +29,22 @@ def _register_user(client, name="Test User", password="correct-horse-battery"):
     return response.get_json()
 
 
+def _mock_free_model_catalog(monkeypatch, model_ids=None):
+    model_ids = model_ids or ["meta-llama/llama-3.1-8b-instruct:free"]
+    model_data = {
+        "models": [{"id": model_id, "name": model_id} for model_id in model_ids],
+        "default": model_ids[0] if model_ids else "",
+    }
+    monkeypatch.setattr(OpenRouterClient, "get_public_models", lambda self: model_data)
+
+
 def test_valid_chat_request_streams_events(monkeypatch, tmp_path):
     app = _make_client(monkeypatch, database_path=tmp_path / "users.sqlite3")
+    _mock_free_model_catalog(monkeypatch)
+    captured = {}
 
     def fake_stream_chat(self, messages, model=None, temperature=0.7, max_tokens=512, fallback_models=None):
+        captured["fallback_models"] = fallback_models
         yield {"event": "meta", "model": model or "meta-llama/llama-3.1-8b-instruct:free", "fallback_used": False}
         yield {"event": "token", "text": "Hello"}
         yield {"event": "done", "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}, "model": model or "meta-llama/llama-3.1-8b-instruct:free", "ms_first_token": 10, "ms_total": 20}
@@ -56,10 +68,12 @@ def test_valid_chat_request_streams_events(monkeypatch, tmp_path):
     assert "event: meta" in body
     assert "event: token" in body
     assert "event: done" in body
+    assert captured["fallback_models"] == []
 
 
 def test_chat_api_reports_incomplete_upstream_response(monkeypatch, tmp_path):
     app = _make_client(monkeypatch, database_path=tmp_path / "users.sqlite3")
+    _mock_free_model_catalog(monkeypatch)
 
     class PartialResponse:
         status_code = 200
@@ -134,8 +148,9 @@ def test_models_are_filtered_and_cached(monkeypatch, tmp_path):
         return FakeResponse({
             "data": [
                 {"id": "paid/model", "name": "Paid", "context_length": 32_000, "pricing": {"prompt": 0.02, "completion": 0.04}},
-                {"id": "free/model", "name": "Free", "context_length": 64_000, "pricing": {"prompt": 0, "completion": 0}},
-                {"id": "other-free", "name": "Other Free", "context_length": 128_000, "pricing": {"prompt": 0, "completion": 0}},
+                {"id": "free/model", "name": "Free", "context_length": 64_000, "pricing": {"prompt": 0, "completion": 0}, "architecture": {"input_modalities": ["text"], "output_modalities": ["text"]}},
+                {"id": "other-free", "name": "Other Free", "context_length": 128_000, "pricing": {"prompt": 0, "completion": 0}, "architecture": {"input_modalities": ["text", "image"], "output_modalities": ["text"]}},
+                {"id": "free-audio", "name": "Audio Generator", "context_length": 16_000, "pricing": {"prompt": 0, "completion": 0}, "architecture": {"input_modalities": ["text"], "output_modalities": ["text", "audio"]}},
             ]
         })
 
@@ -143,17 +158,52 @@ def test_models_are_filtered_and_cached(monkeypatch, tmp_path):
     response = app.test_client().get("/api/models")
     assert response.status_code == 200
     payload = response.get_json()
-    assert payload["default"] == "meta-llama/llama-3.1-8b-instruct:free"
+    assert payload["default"] == "other-free"
     assert all(model["id"] != "paid/model" for model in payload["models"])
+    assert all(model["id"] != "free-audio" for model in payload["models"])
     assert any(item["id"] == "other-free" for item in payload["models"])
     model_ids = {item["id"] for item in payload["models"]}
-    assert "google/gemini-pro-1.5" in model_ids
-    assert "meta-llama/llama-3.1-70b-instruct:free" in model_ids
-    assert "deepseek/deepseek-chat" in model_ids
+    assert "google/gemini-pro-1.5" not in model_ids
+    assert "meta-llama/llama-3.1-70b-instruct:free" not in model_ids
+    assert "deepseek/deepseek-chat" not in model_ids
+
+
+def test_chat_rejects_model_outside_free_catalog(monkeypatch, tmp_path):
+    app = _make_client(monkeypatch, database_path=tmp_path / "users.sqlite3")
+    _mock_free_model_catalog(monkeypatch)
+    monkeypatch.setattr(OpenRouterClient, "stream_chat", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("Paid model must not be called.")))
+    client = app.test_client()
+    _register_user(client)
+
+    response = client.post("/api/chat", json={
+        "model": "deepseek/deepseek-chat",
+        "messages": [{"role": "user", "content": "Do not send this to a paid model."}],
+    })
+
+    assert response.status_code == 400
+    assert "free" in response.get_json()["error"]["message"].lower()
+
+
+def test_enhance_rejects_model_outside_free_catalog(monkeypatch, tmp_path):
+    app = _make_client(monkeypatch, database_path=tmp_path / "users.sqlite3")
+    _mock_free_model_catalog(monkeypatch)
+    monkeypatch.setattr(OpenRouterClient, "enhance_prompt", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("Paid model must not be called.")))
+    client = app.test_client()
+    _register_user(client)
+    csrf_token = client.get("/api/auth/me").get_json()["csrf_token"]
+
+    response = client.post("/api/enhance", json={
+        "prompt": "Improve this prompt.",
+        "model": "deepseek/deepseek-chat",
+    }, headers={"X-CSRF-Token": csrf_token})
+
+    assert response.status_code == 400
+    assert "free" in response.get_json()["error"]["message"].lower()
 
 
 def test_chat_requests_allow_longer_responses(monkeypatch, tmp_path):
     app = _make_client(monkeypatch, database_path=tmp_path / "users.sqlite3")
+    _mock_free_model_catalog(monkeypatch)
     captured = {}
 
     def fake_stream_chat(self, messages, model=None, temperature=0.7, max_tokens=512, fallback_models=None):
@@ -392,6 +442,7 @@ def test_enhance_requires_auth_and_returns_rewritten_prompt(monkeypatch, tmp_pat
     assert unauthorized.status_code == 401
 
     _register_user(client)
+    _mock_free_model_catalog(monkeypatch)
     monkeypatch.setattr(OpenRouterClient, "enhance_prompt", lambda self, prompt, model=None: "Write a clear, concise project brief.")
     csrf_token = client.get("/api/auth/me").get_json()["csrf_token"]
     headers = {"X-CSRF-Token": csrf_token}

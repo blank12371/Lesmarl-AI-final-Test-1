@@ -13,8 +13,19 @@ document.addEventListener('DOMContentLoaded', () => {
   const allowedFileExtensions = /\.(txt|md|csv|json|js|ts|py|html|css|sql|sh|yaml|yml|xml|toml|java|c|cpp|h|go|rs)$/i;
   const maxFileBytes = 200 * 1024;
   const maxTotalAttachmentBytes = 120 * 1024;
+  const chatSearch = document.getElementById('chat-search');
+  const chatList = document.getElementById('chat-list');
+  let conversations = loadConversations();
+  let activeConversationId = null;
+  let currentMode = 'general';
 
   initializeAccount();
+  renderConversationList();
+  chatSearch.addEventListener('input', renderConversationList);
+  chatList.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-conversation-id]');
+    if (button) loadConversation(button.dataset.conversationId);
+  });
   document.getElementById('new-chat').addEventListener('click', startNewChat);
   document.getElementById('open-settings').addEventListener('click', openSettings);
   document.getElementById('settings-account').addEventListener('click', openAuth);
@@ -58,7 +69,8 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('mode-strip').addEventListener('click', (event) => {
     const card = event.target.closest('.mode-card');
     if (!card) return;
-    window.LesmarlUI.setModeSelection(card.dataset.mode);
+    currentMode = card.dataset.mode;
+    window.LesmarlUI.setModeSelection(currentMode);
   });
 
   document.getElementById('composer').addEventListener('submit', async (event) => {
@@ -70,16 +82,32 @@ document.addEventListener('DOMContentLoaded', () => {
     const prompt = textarea.value.trim();
     if (!prompt && !attachments.length) return;
     const submittedAttachments = [...attachments];
+    const conversation = ensureConversation(prompt, submittedAttachments);
+    const priorMessages = conversation.messages.slice(-20).map(({ role, content }) => ({ role, content }));
+    const userContent = prompt || 'Please review the attached files.';
+    const userMeta = submittedAttachments.map((file) => file.name).join(', ') || 'just now';
+    conversation.mode = currentMode;
+    addConversationMessage(conversation, 'user', userContent, userMeta);
     window.LesmarlUI.hideEmptyState();
-    window.LesmarlChat.renderMessage('user', prompt || 'Please review the attached files.', submittedAttachments.map((file) => file.name).join(', ') || 'just now');
+    window.LesmarlChat.renderMessage('user', userContent, userMeta);
     textarea.value = '';
     textarea.dispatchEvent(new Event('input'));
+    const sendButton = document.getElementById('send-button');
+    const stopButton = document.getElementById('stop-button');
+    sendButton.disabled = true;
+    stopButton.hidden = false;
 
     try {
-      await window.LesmarlChat.streamPrompt(prompt, submittedAttachments);
+      const answer = await window.LesmarlChat.streamPrompt(prompt, submittedAttachments, currentMode, priorMessages);
+      if (answer) addConversationMessage(conversation, 'assistant', answer, localStorage.getItem('lesmarl-default-model') || 'Assistant');
       submittedAttachments.forEach((file) => removeAttachment(file.id));
     } catch (error) {
-      window.LesmarlChat.renderMessage('assistant', `Error: ${error.message}`, 'error');
+      const errorText = `Error: ${error.message}`;
+      addConversationMessage(conversation, 'assistant', errorText, 'error');
+      window.LesmarlChat.renderMessage('assistant', errorText, 'error');
+    } finally {
+      sendButton.disabled = false;
+      stopButton.hidden = true;
     }
   });
 
@@ -297,12 +325,105 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function startNewChat() {
+    window.LesmarlChat.stop();
+    activeConversationId = null;
+    currentMode = 'general';
+    window.LesmarlUI.setModeSelection(currentMode);
+    attachments.splice(0);
+    renderAttachments();
     document.getElementById('messages').replaceChildren();
     document.getElementById('empty-state').hidden = false;
     textarea.value = '';
     textarea.dispatchEvent(new Event('input'));
     document.getElementById('chat-panel')?.scrollTo({ top: 0 });
     textarea.focus();
+    renderConversationList();
+  }
+
+  function loadConversations() {
+    try {
+      const stored = JSON.parse(sessionStorage.getItem('lesmarl-chat-history') || '[]');
+      return Array.isArray(stored) ? stored.filter((item) => item && typeof item.id === 'string' && Array.isArray(item.messages)) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function saveConversations() {
+    const stored = conversations.slice(-10).map((conversation) => ({
+      ...conversation,
+      messages: conversation.messages.slice(-20).map((message) => ({
+        role: message.role,
+        content: String(message.content).slice(0, 8000),
+        meta: String(message.meta || '').slice(0, 120)
+      }))
+    }));
+    try {
+      sessionStorage.setItem('lesmarl-chat-history', JSON.stringify(stored));
+    } catch {}
+  }
+
+  function ensureConversation(prompt, submittedAttachments) {
+    let conversation = conversations.find((item) => item.id === activeConversationId);
+    if (!conversation) {
+      const title = prompt || submittedAttachments[0]?.name || 'New chat';
+      conversation = {
+        id: crypto.randomUUID(),
+        title: title.slice(0, 64),
+        mode: currentMode,
+        messages: [],
+        updatedAt: Date.now()
+      };
+      conversations.push(conversation);
+      activeConversationId = conversation.id;
+    }
+    return conversation;
+  }
+
+  function addConversationMessage(conversation, role, content, meta) {
+    conversation.messages.push({ role, content, meta });
+    conversation.updatedAt = Date.now();
+    saveConversations();
+    renderConversationList();
+  }
+
+  function renderConversationList() {
+    const query = chatSearch.value.trim().toLowerCase();
+    const matches = conversations
+      .filter((conversation) => `${conversation.title} ${conversation.messages.map((message) => message.content).join(' ')}`.toLowerCase().includes(query))
+      .sort((left, right) => right.updatedAt - left.updatedAt);
+    chatList.replaceChildren();
+    if (!matches.length) {
+      const empty = document.createElement('p');
+      empty.className = 'chat-list-empty';
+      empty.textContent = query ? 'No matching chats.' : 'No conversations yet.';
+      chatList.append(empty);
+      return;
+    }
+    matches.forEach((conversation) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'chat-item' + (conversation.id === activeConversationId ? ' is-active' : '');
+      button.dataset.conversationId = conversation.id;
+      button.textContent = conversation.title;
+      button.title = conversation.title;
+      chatList.append(button);
+    });
+  }
+
+  function loadConversation(id) {
+    const conversation = conversations.find((item) => item.id === id);
+    if (!conversation) return;
+    window.LesmarlChat.stop();
+    activeConversationId = id;
+    currentMode = conversation.mode || 'general';
+    window.LesmarlUI.setModeSelection(currentMode);
+    document.getElementById('messages').replaceChildren();
+    document.getElementById('empty-state').hidden = true;
+    conversation.messages.forEach((message) => window.LesmarlChat.renderMessage(message.role, message.content, message.meta));
+    textarea.value = '';
+    textarea.dispatchEvent(new Event('input'));
+    renderConversationList();
   }
 
   async function openSettings() {
@@ -312,7 +433,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const response = await fetch('/api/models');
       const data = await response.json();
       const select = document.getElementById('settings-model');
-      const savedModel = localStorage.getItem('lesmarl-default-model') || data.default || '';
+      let savedModel = localStorage.getItem('lesmarl-default-model') || data.default || '';
       select.replaceChildren();
       (data.models || []).forEach((model) => {
         const option = document.createElement('option');
@@ -321,10 +442,9 @@ document.addEventListener('DOMContentLoaded', () => {
         select.append(option);
       });
       if (savedModel && !Array.from(select.options).some((option) => option.value === savedModel)) {
-        const option = document.createElement('option');
-        option.value = savedModel;
-        option.textContent = `${savedModel} (configured)`;
-        select.prepend(option);
+        savedModel = data.default || data.models?.[0]?.id || '';
+        if (savedModel) localStorage.setItem('lesmarl-default-model', savedModel);
+        else localStorage.removeItem('lesmarl-default-model');
       }
       if (!select.options.length) {
         const option = document.createElement('option');
