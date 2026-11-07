@@ -10,7 +10,7 @@ Lesmarl AI is a premium AI chat product built as a polished Flask app with a sta
 - Free model discovery and default model recommendation
 - Dark and light themes with accent selection
 - Markdown rendering, code blocks, attachments, export, and chat management
-- Local conversation storage with graceful fallback
+- Per-account conversation storage in SQLite with a browser cache
 - Security-focused headers and safe rendering of model output
 
 ## Architecture
@@ -148,6 +148,14 @@ Returns JSON like:
   "cached_at": "2026-11-02T00:00:00+00:00"
 }
 ```
+
+### /api/chats
+
+Authenticated `GET` returns the signed-in account's conversations. Authenticated `POST` replaces that account's saved conversations; `DELETE` clears them. Mutating requests require the session CSRF token.
+
+### POST /api/feedback
+
+Emails the submitted `add` and `fix` suggestions to the project maintainer. SMTP credentials must be configured through environment variables; never commit them.
 
 ### GET /health
 
