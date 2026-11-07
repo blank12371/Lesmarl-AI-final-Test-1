@@ -20,3 +20,13 @@ services:
         value: google/gemma-3-4b-it:free,mistralai/mistral-7b-instruct:free
       - key: SITE_URL
         value: https://your-app.onrender.com
+      - key: FEEDBACK_SMTP_HOST
+        sync: false
+      - key: FEEDBACK_SMTP_PORT
+        value: 587
+      - key: FEEDBACK_SMTP_USERNAME
+        sync: false
+      - key: FEEDBACK_SMTP_PASSWORD
+        sync: false
+      - key: FEEDBACK_FROM_EMAIL
+        sync: false

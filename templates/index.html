@@ -48,6 +48,7 @@
       <div class="sidebar__section">
         <div class="section-heading">Conversations</div>
         <div id="chat-list" class="chat-list" aria-live="polite"></div>
+        <p id="chat-storage-status" class="chat-list-empty" role="status" aria-live="polite"></p>
       </div>
 
       <div class="sidebar__section sidebar__section--bottom">
@@ -56,6 +57,7 @@
           <button class="secondary-button" type="button" id="account-button">Sign in</button>
           <button class="ghost-button" type="button" id="sign-out-button" hidden>Sign out</button>
         </div>
+        <button class="ghost-button" type="button" id="open-feedback">Send feedback</button>
         <button class="secondary-button" type="button" id="open-settings">Settings</button>
       </div>
     </aside>
@@ -183,12 +185,30 @@
           <input id="auth-name" name="name" autocomplete="username" minlength="2" maxlength="40" required>
         </label>
         <label class="dialog-field" for="auth-password">Password
-          <input id="auth-password" name="password" type="password" autocomplete="current-password" minlength="10" maxlength="128" required>
+          <input id="auth-password" name="password" type="password" autocomplete="current-password" minlength="4" maxlength="128" required>
         </label>
         <p id="auth-message" class="form-message" role="status" aria-live="polite"></p>
         <button class="primary-button" type="submit" id="auth-submit">Sign in</button>
       </form>
     </div>
+  </dialog>
+
+  <dialog class="app-dialog" id="feedback-dialog" aria-labelledby="feedback-title">
+    <form method="dialog" class="dialog-header">
+      <h2 id="feedback-title">Send feedback</h2>
+      <button class="icon-button" aria-label="Close feedback dialog">×</button>
+    </form>
+    <form id="feedback-form" class="dialog-content">
+      <label class="dialog-field" for="feedback-add">What should we add?
+        <textarea id="feedback-add" name="add" rows="4" maxlength="4000" placeholder="A feature or improvement..."></textarea>
+      </label>
+      <label class="dialog-field" for="feedback-fix">What should we fix?
+        <textarea id="feedback-fix" name="fix" rows="4" maxlength="4000" placeholder="A problem or rough edge..."></textarea>
+      </label>
+      <p class="dialog-note">Feedback is emailed to the Lesmarl AI maintainer.</p>
+      <p id="feedback-status" class="form-message" role="status" aria-live="polite"></p>
+      <button class="primary-button" type="submit" id="feedback-submit">Submit feedback</button>
+    </form>
   </dialog>
 
   <dialog class="app-dialog command-dialog" id="commands-dialog" aria-labelledby="commands-title">

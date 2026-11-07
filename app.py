@@ -4,8 +4,11 @@ import hashlib
 import hmac
 import os
 import secrets
+import smtplib
+import ssl
 import sqlite3
 from contextlib import contextmanager
+from email.message import EmailMessage
 from pathlib import Path
 
 from flask import Flask, Response, jsonify, render_template, request, session, stream_with_context
@@ -24,6 +27,11 @@ MAX_MESSAGE_CHARS = 20_000
 MAX_BODY_BYTES = 200 * 1024
 MAX_COMPLETION_TOKENS = 4096
 PASSWORD_ITERATIONS = 310_000
+MAX_SAVED_CONVERSATIONS = 20
+MAX_SAVED_MESSAGES = 20
+MAX_SAVED_MESSAGE_CHARS = 8_000
+CHAT_MODES = {"general", "code", "writer", "study"}
+FEEDBACK_RECIPIENT = "anasarib1480@gmail.com"
 
 
 def json_error(code, message, extra=None):
@@ -72,6 +80,13 @@ def create_app():
             "name TEXT NOT NULL COLLATE NOCASE UNIQUE, "
             "salt TEXT NOT NULL, password_hash TEXT NOT NULL, "
             "created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)"
+        )
+        connection.execute(
+            "CREATE TABLE IF NOT EXISTS user_chat_storage ("
+            "user_id INTEGER PRIMARY KEY, "
+            "conversations_json TEXT NOT NULL DEFAULT '[]', "
+            "updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+            "FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE)"
         )
 
     def csrf_token():
@@ -178,8 +193,8 @@ def create_app():
         name = name.strip()
         if not 2 <= len(name) <= 40:
             return json_error(400, "Name must be between 2 and 40 characters.")
-        if not 10 <= len(password) <= 128:
-            return json_error(400, "Password must be between 10 and 128 characters.")
+        if not 4 <= len(password) <= 128:
+            return json_error(400, "Password must be between 4 and 128 characters.")
 
         salt = secrets.token_bytes(16)
         password_hash = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, PASSWORD_ITERATIONS)
@@ -234,6 +249,162 @@ def create_app():
             return json_error(400, "Refresh the page and try again.")
         session.clear()
         return jsonify({"user": None, "csrf_token": csrf_token()})
+
+    @app.route("/api/chats", methods=["GET", "POST", "DELETE"])
+    @limiter.limit("60/minute")
+    def api_chats():
+        user_id = session.get("user_id")
+        if not user_id:
+            return json_error(401, "Sign in to access your saved chats.")
+
+        if request.method == "GET":
+            with database_connection() as connection:
+                row = connection.execute(
+                    "SELECT conversations_json FROM user_chat_storage WHERE user_id = ?",
+                    (user_id,),
+                ).fetchone()
+            try:
+                conversations = json.loads(row["conversations_json"]) if row else []
+            except (TypeError, json.JSONDecodeError):
+                conversations = []
+            return jsonify({"conversations": conversations})
+
+        if not csrf_is_valid():
+            return json_error(400, "Refresh the page and try again.")
+
+        if request.method == "DELETE":
+            with database_connection() as connection:
+                connection.execute("DELETE FROM user_chat_storage WHERE user_id = ?", (user_id,))
+            return jsonify({"conversations": []})
+
+        if not request.is_json:
+            return json_error(415, "Request content type must be application/json.")
+        if len(request.get_data(cache=True, as_text=False)) > MAX_BODY_BYTES:
+            return json_error(413, "Chat history exceeds the request size limit.")
+        payload = request.get_json(silent=True)
+        conversations = payload.get("conversations") if isinstance(payload, dict) else None
+        if not isinstance(conversations, list) or len(conversations) > MAX_SAVED_CONVERSATIONS:
+            return json_error(400, "Up to 20 conversations can be saved.")
+
+        sanitized = []
+        seen_ids = set()
+        for conversation in conversations:
+            if not isinstance(conversation, dict):
+                return json_error(400, "Each conversation must be an object.")
+            chat_id = conversation.get("id")
+            title = conversation.get("title")
+            mode = conversation.get("mode", "general")
+            messages = conversation.get("messages")
+            if not isinstance(chat_id, str) or not 1 <= len(chat_id) <= 64 or chat_id in seen_ids:
+                return json_error(400, "Each conversation must have a unique ID.")
+            if not isinstance(title, str) or not title.strip() or len(title) > 64:
+                return json_error(400, "Conversation names must be between 1 and 64 characters.")
+            if mode not in CHAT_MODES:
+                return json_error(400, "Conversation mode is invalid.")
+            if not isinstance(messages, list) or len(messages) > MAX_SAVED_MESSAGES:
+                return json_error(400, "Each conversation can contain up to 20 messages.")
+
+            sanitized_messages = []
+            for message in messages:
+                if not isinstance(message, dict):
+                    return json_error(400, "Each chat message must be an object.")
+                role = message.get("role")
+                content = message.get("content")
+                meta = message.get("meta", "")
+                if role not in {"user", "assistant"}:
+                    return json_error(400, "Saved chat message role is invalid.")
+                if not isinstance(content, str) or len(content) > MAX_SAVED_MESSAGE_CHARS:
+                    return json_error(400, "Saved chat messages must be 8,000 characters or fewer.")
+                if not isinstance(meta, str):
+                    meta = ""
+                sanitized_messages.append({"role": role, "content": content, "meta": meta[:120]})
+
+            seen_ids.add(chat_id)
+            sanitized.append({
+                "id": chat_id,
+                "title": title.strip(),
+                "mode": mode,
+                "createdAt": conversation.get("createdAt", 0) if isinstance(conversation.get("createdAt", 0), (int, float)) else 0,
+                "updatedAt": conversation.get("updatedAt", 0) if isinstance(conversation.get("updatedAt", 0), (int, float)) else 0,
+                "messages": sanitized_messages,
+            })
+
+        serialized = json.dumps(sanitized, ensure_ascii=False, separators=(",", ":"))
+        with database_connection() as connection:
+            connection.execute(
+                "INSERT INTO user_chat_storage (user_id, conversations_json, updated_at) "
+                "VALUES (?, ?, CURRENT_TIMESTAMP) "
+                "ON CONFLICT(user_id) DO UPDATE SET "
+                "conversations_json = excluded.conversations_json, updated_at = CURRENT_TIMESTAMP",
+                (user_id, serialized),
+            )
+        return jsonify({"conversations": sanitized})
+
+    @app.route("/api/feedback", methods=["POST"])
+    @limiter.limit("3/hour")
+    def api_feedback():
+        if not csrf_is_valid():
+            return json_error(400, "Refresh the page and try again.")
+        if not request.is_json:
+            return json_error(415, "Request content type must be application/json.")
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict):
+            return json_error(400, "Enter your feedback before submitting.")
+        add_suggestion = payload.get("add", "")
+        fix_suggestion = payload.get("fix", "")
+        if not isinstance(add_suggestion, str) or not isinstance(fix_suggestion, str):
+            return json_error(400, "Feedback must be text.")
+        add_suggestion = add_suggestion.strip()
+        fix_suggestion = fix_suggestion.strip()
+        if not add_suggestion and not fix_suggestion:
+            return json_error(400, "Tell us something to add or fix.")
+        if len(add_suggestion) > 4_000 or len(fix_suggestion) > 4_000:
+            return json_error(413, "Each feedback answer must be 4,000 characters or fewer.")
+
+        smtp_host = os.getenv("FEEDBACK_SMTP_HOST", "").strip()
+        smtp_username = os.getenv("FEEDBACK_SMTP_USERNAME", "").strip()
+        smtp_password = os.getenv("FEEDBACK_SMTP_PASSWORD", "")
+        from_address = os.getenv("FEEDBACK_FROM_EMAIL", "").strip() or smtp_username
+        try:
+            smtp_port = int(os.getenv("FEEDBACK_SMTP_PORT", "587"))
+        except ValueError:
+            return json_error(503, "Feedback email is not configured correctly.")
+        if not smtp_host or not from_address or not smtp_username or not smtp_password:
+            return json_error(503, "Feedback email is not configured yet.")
+
+        account_name = "Anonymous"
+        user_id = session.get("user_id")
+        if user_id:
+            with database_connection() as connection:
+                user = connection.execute("SELECT name FROM users WHERE id = ?", (user_id,)).fetchone()
+            if user:
+                account_name = user["name"]
+
+        message = EmailMessage()
+        message["Subject"] = "Lesmarl AI user feedback"
+        message["From"] = from_address
+        message["To"] = FEEDBACK_RECIPIENT
+        message.set_content(
+            f"Account: {account_name}\n\n"
+            f"Something to add:\n{add_suggestion or '(not provided)'}\n\n"
+            f"Something to fix:\n{fix_suggestion or '(not provided)'}\n"
+        )
+        try:
+            if smtp_port == 465:
+                with smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=15, context=ssl.create_default_context()) as server:
+                    server.login(smtp_username, smtp_password)
+                    server.send_message(message)
+            else:
+                with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as server:
+                    server.ehlo()
+                    server.starttls(context=ssl.create_default_context())
+                    server.ehlo()
+                    server.login(smtp_username, smtp_password)
+                    server.send_message(message)
+        except (OSError, smtplib.SMTPException):
+            app.logger.exception("Feedback email delivery failed")
+            return json_error(502, "Feedback could not be emailed right now. Please try again later.")
+        return jsonify({"sent": True})
 
     @app.route("/api/enhance", methods=["POST"])
     @limiter.limit("10/minute")

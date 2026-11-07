@@ -90,17 +90,24 @@ Then visit http://localhost:5000.
 | --- | --- | --- |
 | OPENROUTER_API_KEY | Secret API key from OpenRouter | `sk-or-...` |
 | SESSION_SECRET | Secret used to sign login sessions | Generate a long random value |
-| DATABASE_PATH | SQLite file path for account records | `lesmarl.sqlite3` |
+| DATABASE_PATH | SQLite file path for accounts and per-account chat storage | `lesmarl.sqlite3` |
 | DEFAULT_MODEL | Preferred free model | `meta-llama/llama-3.1-8b-instruct:free` |
 | FALLBACK_MODELS | Comma-separated fallback models | `google/gemma-3-4b-it:free,mistralai/mistral-7b-instruct:free` |
 | SITE_URL | Public URL used as HTTP-Referer | `https://example.com` |
 | PORT | Flask port for local runs | `5000` |
 | PYTHON_VERSION | Runtime version | `3.11` |
 | RATE_LIMIT | Request rate limit | `60/minute` |
+| FEEDBACK_SMTP_HOST | SMTP server used to email feedback | `smtp.gmail.com` |
+| FEEDBACK_SMTP_PORT | SMTP TLS port | `587` |
+| FEEDBACK_SMTP_USERNAME | SMTP account username | Set as a secret in Render |
+| FEEDBACK_SMTP_PASSWORD | SMTP app password or credential | Set as a secret in Render |
+| FEEDBACK_FROM_EMAIL | Optional sender address; defaults to SMTP username | `your-sender@gmail.com` |
 
 ## Accounts and data persistence
 
-Users can create an account with a name and password, sign in, and sign out. Passwords are stored as salted PBKDF2 hashes; the original password is never stored. Set `SESSION_SECRET` to a long, random secret in production so sessions remain valid across restarts. The SQLite database is controlled by `DATABASE_PATH`.
+Users can create an account with a name and password, sign in, and sign out. Passwords are stored as salted PBKDF2 hashes; the original password is never stored. Chat history is stored per account in SQLite and restored on sign-in. Set `SESSION_SECRET` to a long, random secret in production so sessions remain valid across restarts. The SQLite database is controlled by `DATABASE_PATH`.
+
+Feedback is emailed to the project maintainer. Configure `FEEDBACK_SMTP_HOST`, `FEEDBACK_SMTP_USERNAME`, and `FEEDBACK_SMTP_PASSWORD` in Render; keep the password secret. Feedback submissions return a configuration error until SMTP is set up.
 
 Render free instances have an ephemeral filesystem. With the default SQLite setup, account records can be lost when the service restarts or redeploys. Use a persistent disk or a managed database for accounts that must survive deployments. This basic account system has no email verification or password-reset flow.
 

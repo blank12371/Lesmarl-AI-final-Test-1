@@ -10,6 +10,7 @@ window.LesmarlChat = (() => {
       <div class="message__header">
         <strong>${role === 'assistant' ? 'Assistant' : 'You'}</strong>
         <span>${meta}</span>
+        <button class="message__copy" type="button" data-copy-message aria-label="Copy ${role === 'assistant' ? 'AI response' : 'prompt'}">Copy</button>
       </div>
       <div class="message__content">${window.LesmarlMarkdown.render(content)}</div>
     `;
@@ -72,7 +73,7 @@ window.LesmarlChat = (() => {
 
     message.node.className = 'message message--assistant';
     message.node.innerHTML = `
-      <div class="message__header"><strong>Assistant</strong><span>Streaming</span></div>
+      <div class="message__header"><strong>Assistant</strong><span>Streaming</span><button class="message__copy" type="button" data-copy-message aria-label="Copy AI response">Copy</button></div>
       <div class="message__content"></div>
     `;
     document.getElementById('messages').appendChild(message.node);

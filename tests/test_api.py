@@ -454,3 +454,121 @@ def test_enhance_requires_auth_and_returns_rewritten_prompt(monkeypatch, tmp_pat
 
     invalid = client.post("/api/enhance", json={"prompt": " "}, headers=headers)
     assert invalid.status_code == 400
+
+
+def test_four_character_password_is_hashed_and_can_sign_in(monkeypatch, tmp_path):
+    app = _make_client(monkeypatch, database_path=tmp_path / "users.sqlite3")
+    client = app.test_client()
+    csrf_token = client.get("/api/auth/me").get_json()["csrf_token"]
+    too_short = client.post(
+        "/api/auth/register",
+        json={"name": "Too Short", "password": "abc"},
+        headers={"X-CSRF-Token": csrf_token},
+    )
+    assert too_short.status_code == 400
+    registration = client.post(
+        "/api/auth/register",
+        json={"name": "Short Pass", "password": "a1B!"},
+        headers={"X-CSRF-Token": csrf_token},
+    )
+    assert registration.status_code == 201
+
+    with sqlite3.connect(tmp_path / "users.sqlite3") as connection:
+        stored_hash = connection.execute("SELECT password_hash FROM users WHERE name = ?", ("Short Pass",)).fetchone()[0]
+    assert stored_hash != "a1B!"
+
+    logout_token = client.post("/api/auth/logout", headers={"X-CSRF-Token": registration.get_json()["csrf_token"]}).get_json()["csrf_token"]
+    login = client.post(
+        "/api/auth/login",
+        json={"name": "Short Pass", "password": "a1B!"},
+        headers={"X-CSRF-Token": logout_token},
+    )
+    assert login.status_code == 200
+    assert login.get_json()["user"]["name"] == "Short Pass"
+
+
+def test_account_chat_storage_is_private_and_survives_relogin(monkeypatch, tmp_path):
+    app = _make_client(monkeypatch, database_path=tmp_path / "users.sqlite3")
+    first_client = app.test_client()
+    _register_user(first_client, name="First User", password="first4")
+    first_csrf = first_client.get("/api/auth/me").get_json()["csrf_token"]
+    conversations = [{
+        "id": "chat-1",
+        "title": "Chat 1",
+        "mode": "general",
+        "createdAt": 100,
+        "updatedAt": 200,
+        "messages": [
+            {"role": "user", "content": "My private prompt", "meta": "just now"},
+            {"role": "assistant", "content": "My private reply", "meta": "free model"},
+        ],
+    }]
+    saved = first_client.post("/api/chats", json={"conversations": conversations}, headers={"X-CSRF-Token": first_csrf})
+    assert saved.status_code == 200
+
+    second_client = app.test_client()
+    _register_user(second_client, name="Second User", password="second4")
+    assert second_client.get("/api/chats").get_json()["conversations"] == []
+
+    logout = first_client.post("/api/auth/logout", headers={"X-CSRF-Token": first_csrf})
+    login = first_client.post(
+        "/api/auth/login",
+        json={"name": "First User", "password": "first4"},
+        headers={"X-CSRF-Token": logout.get_json()["csrf_token"]},
+    )
+    assert login.status_code == 200
+    restored = first_client.get("/api/chats").get_json()["conversations"]
+    assert restored == conversations
+    deletion = first_client.delete(
+        "/api/chats",
+        headers={"X-CSRF-Token": login.get_json()["csrf_token"]},
+    )
+    assert deletion.status_code == 200
+    assert first_client.get("/api/chats").get_json()["conversations"] == []
+
+
+def test_feedback_is_emailed_to_owner(monkeypatch, tmp_path):
+    app = _make_client(monkeypatch, database_path=tmp_path / "users.sqlite3")
+    monkeypatch.setenv("FEEDBACK_SMTP_HOST", "smtp.example.test")
+    monkeypatch.setenv("FEEDBACK_SMTP_PORT", "587")
+    monkeypatch.setenv("FEEDBACK_SMTP_USERNAME", "sender@example.test")
+    monkeypatch.setenv("FEEDBACK_SMTP_PASSWORD", "smtp-test-secret")
+    sent = {}
+
+    class FakeSMTP:
+        def __init__(self, host, port, timeout=None):
+            sent["connection"] = (host, port)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def ehlo(self):
+            return None
+
+        def starttls(self, context=None):
+            return None
+
+        def login(self, username, password):
+            assert username == "sender@example.test"
+            assert password == "smtp-test-secret"
+
+        def send_message(self, message):
+            sent["message"] = message
+
+    monkeypatch.setattr("smtplib.SMTP", FakeSMTP)
+    client = app.test_client()
+    csrf_token = client.get("/api/auth/me").get_json()["csrf_token"]
+    response = client.post(
+        "/api/feedback",
+        json={"add": "Add keyboard shortcuts", "fix": "Improve mobile layout"},
+        headers={"X-CSRF-Token": csrf_token},
+    )
+
+    assert response.status_code == 200
+    assert sent["connection"] == ("smtp.example.test", 587)
+    assert sent["message"]["To"] == "anasarib1480@gmail.com"
+    assert "Add keyboard shortcuts" in sent["message"].get_content()
+    assert "Improve mobile layout" in sent["message"].get_content()

@@ -305,10 +305,29 @@
 .message__header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
+  gap: var(--spacing-3);
   margin-bottom: var(--spacing-2);
   color: var(--color-text-secondary);
   font-size: var(--type-xs);
+}
+
+.message__header span {
+  margin-left: auto;
+}
+
+.message__copy {
+  padding: 0.2rem 0.45rem;
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-1);
+  font-size: var(--type-xs);
+}
+
+.message__copy:hover,
+.message__copy:focus-visible {
+  color: var(--color-text-primary);
+  border-color: var(--color-accent-1);
 }
 
 .message__content {
@@ -523,6 +542,18 @@
 .form-message {
   color: var(--color-text-muted);
   font-size: var(--type-sm);
+}
+
+.dialog-content textarea {
+  width: 100%;
+  min-height: 100px;
+  resize: vertical;
+  padding: 0.75rem 0.85rem;
+  color: var(--color-text-primary);
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-1);
+  line-height: 1.5;
 }
 
 .form-message:not(:empty) {

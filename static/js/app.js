@@ -15,11 +15,10 @@ document.addEventListener('DOMContentLoaded', () => {
   const maxTotalAttachmentBytes = 120 * 1024;
   const chatSearch = document.getElementById('chat-search');
   const chatList = document.getElementById('chat-list');
-  let conversations = loadConversations();
-  let nextChatNumber = conversations.reduce((next, conversation) => {
-    const match = /^Chat (\d+)$/.exec(conversation.title);
-    return match ? Math.max(next, Number(match[1]) + 1) : next;
-  }, 1);
+  const chatStorageStatus = document.getElementById('chat-storage-status');
+  let conversations = [];
+  let nextChatNumber = 1;
+  let saveQueue = Promise.resolve();
   let activeConversationId = null;
   let currentMode = 'general';
 
@@ -30,13 +29,22 @@ document.addEventListener('DOMContentLoaded', () => {
     const button = event.target.closest('[data-conversation-id]');
     if (button) loadConversation(button.dataset.conversationId);
   });
-  document.getElementById('new-chat').addEventListener('click', startNewChat);
+  document.getElementById('new-chat').addEventListener('click', () => {
+    if (!currentUser) {
+      openAuth();
+      return;
+    }
+    startNewChat();
+  });
   document.getElementById('open-settings').addEventListener('click', openSettings);
+  document.getElementById('open-feedback').addEventListener('click', openFeedback);
+  document.getElementById('feedback-form').addEventListener('submit', submitFeedback);
   document.getElementById('settings-account').addEventListener('click', openAuth);
   document.getElementById('account-button').addEventListener('click', openAuth);
   document.getElementById('sign-out-button').addEventListener('click', signOut);
   document.getElementById('settings-sign-out').addEventListener('click', signOut);
   document.getElementById('delete-all-chats').addEventListener('click', deleteAllChats);
+  document.getElementById('messages').addEventListener('click', copyMessage);
   document.getElementById('auth-form').addEventListener('submit', submitAuth);
   document.getElementById('enhance-prompt').addEventListener('click', enhancePrompt);
   document.getElementById('accept-enhanced-prompt').addEventListener('click', acceptEnhancedPrompt);
@@ -141,7 +149,12 @@ document.addEventListener('DOMContentLoaded', () => {
       csrfToken = data.csrf_token || '';
       currentUser = data.user;
       updateAccountControls();
-      if (!currentUser) openAuth();
+      if (currentUser) {
+        await loadAccountConversations();
+      } else {
+        resetVisibleChats();
+        openAuth();
+      }
     } catch (error) {
       document.getElementById('auth-message').textContent = 'Could not connect to the account service. Refresh and try again.';
     }
@@ -241,6 +254,56 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  function openFeedback() {
+    document.getElementById('settings-dialog').close();
+    document.getElementById('feedback-status').textContent = '';
+    document.getElementById('feedback-submit').textContent = 'Submit feedback';
+    document.getElementById('feedback-submit').disabled = false;
+    document.getElementById('feedback-dialog').showModal();
+  }
+
+  async function submitFeedback(event) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const submit = document.getElementById('feedback-submit');
+    const status = document.getElementById('feedback-status');
+    submit.disabled = true;
+    status.textContent = '';
+    try {
+      const response = await fetch('/api/feedback', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+        body: JSON.stringify({
+          add: document.getElementById('feedback-add').value,
+          fix: document.getElementById('feedback-fix').value
+        })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error?.message || 'Feedback could not be submitted.');
+      form.reset();
+      status.textContent = 'Thanks. Your feedback was emailed.';
+      submit.textContent = 'Submitted';
+    } catch (error) {
+      status.textContent = error.message;
+      submit.disabled = false;
+    }
+  }
+
+  async function copyMessage(event) {
+    const button = event.target.closest('[data-copy-message]');
+    if (!button) return;
+    const content = button.closest('.message')?.querySelector('.message__content')?.innerText;
+    if (!content) return;
+    try {
+      await navigator.clipboard.writeText(content);
+      button.textContent = 'Copied';
+      window.setTimeout(() => { button.textContent = 'Copy'; }, 1200);
+    } catch (error) {
+      window.alert('Could not access the clipboard. Check browser permissions and try again.');
+    }
+  }
+
   function acceptEnhancedPrompt() {
     textarea.value = document.getElementById('enhanced-prompt-preview').value;
     textarea.dispatchEvent(new Event('input', { bubbles: true }));
@@ -265,7 +328,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('auth-title').textContent = isRegister ? 'Create account' : 'Sign in';
     document.getElementById('auth-submit').textContent = isRegister ? 'Create account' : 'Sign in';
     document.getElementById('auth-password').autocomplete = isRegister ? 'new-password' : 'current-password';
-    document.getElementById('auth-message').textContent = isRegister ? 'Use a name and a password of at least 10 characters.' : '';
+    document.getElementById('auth-message').textContent = isRegister ? 'Use a name and a password of at least 4 characters.' : '';
     document.querySelectorAll('[data-auth-mode]').forEach((button) => {
       button.classList.toggle('is-selected', button.dataset.authMode === authMode);
     });
@@ -300,6 +363,8 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!response.ok) throw new Error(data.error?.message || 'Account request failed.');
       currentUser = data.user;
       csrfToken = data.csrf_token || '';
+      resetVisibleChats();
+      await loadAccountConversations();
       document.getElementById('auth-form').reset();
       document.getElementById('auth-dialog').close();
       updateAccountControls();
@@ -312,6 +377,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   async function signOut() {
     try {
+      await saveQueue.catch(() => {});
       const response = await fetch('/api/auth/logout', {
         method: 'POST',
         credentials: 'same-origin',
@@ -322,7 +388,7 @@ document.addEventListener('DOMContentLoaded', () => {
       csrfToken = data.csrf_token || '';
       currentUser = null;
       updateAccountControls();
-      startNewChat();
+      resetVisibleChats();
       openAuth();
     } catch (error) {
       window.alert(error.message);
@@ -345,8 +411,42 @@ document.addEventListener('DOMContentLoaded', () => {
     renderConversationList();
   }
 
-  function deleteAllChats() {
+  async function deleteAllChats() {
+    if (!currentUser) {
+      openAuth();
+      return;
+    }
     if (!window.confirm('Delete all saved chats from this browser? This cannot be undone.')) return;
+    const button = document.getElementById('delete-all-chats');
+    button.disabled = true;
+    try {
+      await saveQueue.catch(() => {});
+      const response = await fetch('/api/chats', {
+        method: 'DELETE',
+        credentials: 'same-origin',
+        headers: { 'X-CSRF-Token': csrfToken }
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error?.message || 'Could not delete saved chats.');
+    } catch (error) {
+      window.alert(error.message);
+      button.disabled = false;
+      return;
+    }
+
+    window.LesmarlChat.stop();
+    conversations = [];
+    activeConversationId = null;
+    nextChatNumber = 1;
+    currentMode = 'general';
+    localStorage.removeItem(getUserChatStorageKey());
+    localStorage.removeItem('lesmarl-chat-history');
+    sessionStorage.removeItem('lesmarl-chat-history');
+    resetVisibleChats();
+    document.getElementById('settings-dialog').close();
+  }
+
+  function resetVisibleChats() {
     window.LesmarlChat.stop();
     conversations = [];
     activeConversationId = null;
@@ -360,37 +460,60 @@ document.addEventListener('DOMContentLoaded', () => {
     textarea.dispatchEvent(new Event('input'));
     document.getElementById('chat-panel')?.scrollTo({ top: 0 });
     chatSearch.value = '';
-    localStorage.removeItem('lesmarl-chat-history');
-    sessionStorage.removeItem('lesmarl-chat-history');
     window.LesmarlUI.setModeSelection(currentMode);
+    chatStorageStatus.textContent = currentUser ? 'Loading your account chats...' : 'Sign in to view your saved chats.';
     renderConversationList();
   }
 
-  function loadConversations() {
+  function getUserChatStorageKey() {
+    return currentUser ? `lesmarl-chat-history:${currentUser.id}` : '';
+  }
+
+  function normalizeConversations(items) {
+    if (!Array.isArray(items)) return [];
+    return items
+      .filter((item) => item && typeof item.id === 'string' && Array.isArray(item.messages))
+      .slice(-20)
+      .map((item, index) => ({
+        ...item,
+        title: /^Chat \d+$/.test(item.title || '') ? item.title : `Chat ${index + 1}`,
+        createdAt: item.createdAt || item.updatedAt || Date.now()
+      }));
+  }
+
+  function updateNextChatNumber() {
+    nextChatNumber = conversations.reduce((next, conversation) => {
+      const match = /^Chat (\d+)$/.exec(conversation.title);
+      return match ? Math.max(next, Number(match[1]) + 1) : next;
+    }, 1);
+  }
+
+  async function loadAccountConversations() {
+    const storageKey = getUserChatStorageKey();
     try {
-      const currentHistory = localStorage.getItem('lesmarl-chat-history');
-      const legacyHistory = sessionStorage.getItem('lesmarl-chat-history');
-      const stored = JSON.parse(currentHistory || legacyHistory || '[]');
-      if (!Array.isArray(stored)) return [];
-      const loaded = stored
-        .filter((item) => item && typeof item.id === 'string' && Array.isArray(item.messages))
-        .slice(-20)
-        .map((item, index) => ({
-          ...item,
-          title: /^Chat \d+$/.test(item.title || '') ? item.title : `Chat ${index + 1}`,
-          createdAt: item.createdAt || item.updatedAt || Date.now()
-        }));
-      localStorage.setItem('lesmarl-chat-history', JSON.stringify(loaded));
+      const response = await fetch('/api/chats', { credentials: 'same-origin' });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error?.message || 'Could not load saved chats.');
+      conversations = normalizeConversations(data.conversations);
+      localStorage.setItem(storageKey, JSON.stringify(conversations));
+      chatStorageStatus.textContent = 'Chats are saved to your account.';
       sessionStorage.removeItem('lesmarl-chat-history');
-      return loaded;
     } catch {
-      return [];
+      try {
+        conversations = normalizeConversations(JSON.parse(localStorage.getItem(storageKey) || '[]'));
+      } catch {
+        conversations = [];
+      }
+      chatStorageStatus.textContent = 'Could not sync chats. A browser copy is being used.';
     }
+    updateNextChatNumber();
+    renderConversationList();
   }
 
   function saveConversations() {
+    if (!currentUser) return Promise.resolve();
     conversations = conversations.slice(-20);
-    const stored = conversations.map((conversation) => ({
+    let stored = conversations.map((conversation) => ({
       ...conversation,
       messages: conversation.messages.slice(-20).map((message) => ({
         role: message.role,
@@ -398,9 +521,35 @@ document.addEventListener('DOMContentLoaded', () => {
         meta: String(message.meta || '').slice(0, 120)
       }))
     }));
+    let serialized = JSON.stringify({ conversations: stored });
+    while (new TextEncoder().encode(serialized).length > 180 * 1024) {
+      const oldest = stored.find((conversation) => conversation.messages.length);
+      if (!oldest) break;
+      oldest.messages.shift();
+      const source = conversations.find((conversation) => conversation.id === oldest.id);
+      if (source?.messages.length) source.messages.shift();
+      serialized = JSON.stringify({ conversations: stored });
+    }
     try {
-      localStorage.setItem('lesmarl-chat-history', JSON.stringify(stored));
+      localStorage.setItem(getUserChatStorageKey(), JSON.stringify(stored));
     } catch {}
+    const userId = currentUser.id;
+    const token = csrfToken;
+    saveQueue = saveQueue.catch(() => {}).then(async () => {
+      if (!currentUser || currentUser.id !== userId) return;
+      const response = await fetch('/api/chats', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': token },
+        body: serialized
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error?.message || 'Could not save chats to your account.');
+      chatStorageStatus.textContent = 'Chats are saved to your account.';
+    }).catch(() => {
+      chatStorageStatus.textContent = 'Could not sync chats. A browser copy is being used.';
+    });
+    return saveQueue;
   }
 
   function ensureConversation(prompt, submittedAttachments) {
@@ -525,7 +674,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const command = event.target.closest('[data-command]')?.dataset.command;
     if (!command) return;
     document.getElementById('commands-dialog').close();
-    if (command === 'new') startNewChat();
+    if (command === 'new' && currentUser) startNewChat();
+    if (command === 'new' && !currentUser) openAuth();
     if (command === 'settings') openSettings();
     if (command === 'theme') applyTheme(document.body.dataset.theme === 'dark' ? 'light' : 'dark');
     if (command === 'account') openAuth();
