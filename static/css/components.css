@@ -309,6 +309,14 @@
   text-decoration: underline;
 }
 
+.response-warning {
+  margin-top: var(--spacing-3);
+  padding: var(--spacing-2) var(--spacing-3);
+  color: var(--color-text-secondary);
+  border-left: 3px solid var(--color-accent-1);
+  background: rgba(116, 192, 252, 0.08);
+}
+
 .message__content code {
   background: rgba(148,163,184,0.12);
   border-radius: 6px;

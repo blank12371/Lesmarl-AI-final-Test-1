@@ -22,7 +22,13 @@ ALLOWED_ROLES = {"system", "user", "assistant"}
 MAX_MESSAGE_COUNT = 60
 MAX_MESSAGE_CHARS = 20_000
 MAX_BODY_BYTES = 200 * 1024
+MAX_COMPLETION_TOKENS = 4096
 PASSWORD_ITERATIONS = 310_000
+FEATURED_MODELS = (
+    {"id": "google/gemini-pro-1.5", "name": "Gemini 1.5 Pro (legacy; availability may vary)", "context_length": 0, "description": "Legacy model ID from the provided list; check OpenRouter availability and pricing."},
+    {"id": "meta-llama/llama-3.1-70b-instruct:free", "name": "Llama 3.1 70B Instruct (free; availability may vary)", "context_length": 0, "description": "Free-tier model ID from the provided list; check OpenRouter availability."},
+    {"id": "deepseek/deepseek-chat", "name": "DeepSeek V3 (pricing may vary)", "context_length": 0, "description": "Model ID from the provided list; check OpenRouter availability and pricing."},
+)
 
 
 def json_error(code, message, extra=None):
@@ -139,6 +145,9 @@ def create_app():
         current_config = AppConfig()
         client = OpenRouterClient(api_key=current_config.api_key, site_url=current_config.site_url)
         response = client.get_public_models()
+        models = response.get("models", [])
+        known_ids = {item.get("id") for item in models if isinstance(item, dict)}
+        response["models"] = models + [item for item in FEATURED_MODELS if item["id"] not in known_ids]
         default_value = current_config.default_model
         if default_value and response.get("default"):
             response["default"] = response["default"] or default_value
@@ -324,7 +333,7 @@ def create_app():
             return json_error(400, "Temperature must be between 0 and 2.")
 
         try:
-            max_tokens = int(payload.get("max_tokens", 512))
+            max_tokens = int(payload.get("max_tokens", MAX_COMPLETION_TOKENS))
         except (TypeError, ValueError):
             return json_error(400, "Max tokens must be an integer between 1 and 8192.")
         if not 1 <= max_tokens <= 8192:

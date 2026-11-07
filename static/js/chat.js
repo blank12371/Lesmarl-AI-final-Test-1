@@ -23,7 +23,7 @@ window.LesmarlChat = (() => {
     const messages = [{ role: 'user', content: prompt || 'Please review the attached files.' }];
     const attachmentChunkSize = 12_000;
     attachments.forEach((file) => {
-      const chunks = file.content.match(new RegExp(`.{1,${attachmentChunkSize}}`, 's')) || [''];
+      const chunks = file.content.match(new RegExp(`[\\s\\S]{1,${attachmentChunkSize}}`, 'g')) || [''];
       chunks.forEach((chunk, index) => {
         const chunkLabel = chunks.length > 1 ? ` (part ${index + 1}/${chunks.length})` : '';
         messages.push({ role: 'user', content: `Attached file: ${file.name}${chunkLabel}\n\n${chunk}` });
@@ -33,7 +33,7 @@ window.LesmarlChat = (() => {
       model: localStorage.getItem('lesmarl-default-model') || null,
       messages,
       temperature: 0.7,
-      max_tokens: 512
+      max_tokens: 4096
     });
     if (new TextEncoder().encode(requestBody).length > 180 * 1024) {
       throw new Error('The prompt and attachments exceed the request size limit. Remove a file and try again.');
@@ -91,7 +91,12 @@ window.LesmarlChat = (() => {
           contentNode.innerHTML = window.LesmarlMarkdown.render(currentText);
         } else if (event === 'done') {
           const doneMeta = JSON.parse(text);
-          message.node.querySelector('.message__header span').textContent = doneMeta.model || 'complete';
+          const modelLabel = doneMeta.model || 'complete';
+          message.node.querySelector('.message__header span').textContent = modelLabel;
+          if (doneMeta.truncated) {
+            const contentNode = message.node.querySelector('.message__content');
+            contentNode.insertAdjacentHTML('beforeend', '<p class="response-warning">This response reached the model output limit. Ask to continue for the rest.</p>');
+          }
         } else if (event === 'error') {
           const err = JSON.parse(text);
           const contentNode = message.node.querySelector('.message__content');

@@ -121,7 +121,7 @@ class OpenRouterClient:
             raise ValueError("The model returned no enhanced prompt.")
         return content.strip()
 
-    def stream_chat(self, messages: List[Dict[str, str]], model: Optional[str] = None, temperature: float = 0.7, max_tokens: int = 512, fallback_models: Optional[List[str]] = None):
+    def stream_chat(self, messages: List[Dict[str, str]], model: Optional[str] = None, temperature: float = 0.7, max_tokens: int = 4096, fallback_models: Optional[List[str]] = None):
         if not self.api_key:
             raise RuntimeError("OpenRouter API key is not configured.")
 
@@ -148,6 +148,7 @@ class OpenRouterClient:
                 "max_tokens": max_tokens,
                 "stream": True,
             }
+            received_content = False
             try:
                 response = requests.post(
                     f"{self.base_url}/chat/completions",
@@ -166,13 +167,15 @@ class OpenRouterClient:
                 response.encoding = "utf-8"
                 start = time.time()
                 first_token_ms = None
-                received_content = False
+                truncated = False
+                saw_done_marker = False
                 for line in response.iter_lines(decode_unicode=True):
                     if not line:
                         continue
                     if line.startswith("data: "):
                         data = line[6:]
                         if data == "[DONE]":
+                            saw_done_marker = True
                             break
                         try:
                             chunk = json.loads(data)
@@ -181,6 +184,8 @@ class OpenRouterClient:
                         choices = chunk.get("choices", [])
                         if not choices:
                             continue
+                        if choices[0].get("finish_reason") == "length":
+                            truncated = True
                         delta = choices[0].get("delta", {})
                         token = delta.get("content") or ""
                         if token:
@@ -188,15 +193,19 @@ class OpenRouterClient:
                             if first_token_ms is None:
                                 first_token_ms = int((time.time() - start) * 1000)
                             yield {"event": "token", "text": token}
+                if not saw_done_marker:
+                    raise RuntimeError("The model response was incomplete because the stream ended early. Please retry.")
                 if not received_content:
                     if index < len(candidates) - 1:
                         fallback_used = True
                         continue
                     raise RuntimeError("OpenRouter returned no content for this request. Try again or switch models.")
                 usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
-                yield {"event": "done", "usage": usage, "model": candidate, "ms_first_token": first_token_ms or 0, "ms_total": int((time.time() - start) * 1000)}
+                yield {"event": "done", "usage": usage, "model": candidate, "truncated": truncated, "ms_first_token": first_token_ms or 0, "ms_total": int((time.time() - start) * 1000)}
                 return
             except requests.RequestException as exc:
+                if received_content:
+                    raise RuntimeError("The model connection ended before the answer was complete. Please retry.") from exc
                 last_error = str(exc)
                 if index < len(candidates) - 1:
                     fallback_used = True
