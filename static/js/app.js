@@ -330,13 +330,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function startNewChat() {
     window.LesmarlChat.stop();
-    const activeConversation = conversations.find((item) => item.id === activeConversationId);
-    if (!activeConversation || activeConversation.messages.length) {
-      currentMode = 'general';
-      createConversation();
-    } else {
-      currentMode = activeConversation.mode || currentMode;
-    }
+    currentMode = 'general';
+    createConversation();
     window.LesmarlUI.setModeSelection(currentMode);
     attachments.splice(0);
     renderAttachments();
