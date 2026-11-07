@@ -58,7 +58,7 @@ class OpenRouterClient:
                     completion = float(price.get("completion", 0) or 0)
                 except (TypeError, ValueError):
                     continue
-                if prompt > 0 or completion > 0:
+                if prompt != 0 or completion != 0:
                     continue
                 architecture = item.get("architecture") or {}
                 if not isinstance(architecture, dict):

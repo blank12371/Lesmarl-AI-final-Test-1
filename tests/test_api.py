@@ -148,6 +148,7 @@ def test_models_are_filtered_and_cached(monkeypatch, tmp_path):
         return FakeResponse({
             "data": [
                 {"id": "paid/model", "name": "Paid", "context_length": 32_000, "pricing": {"prompt": 0.02, "completion": 0.04}},
+                {"id": "unknown-price/model", "name": "Unknown Price", "context_length": 48_000, "pricing": {"prompt": -1, "completion": -1}, "architecture": {"input_modalities": ["text"], "output_modalities": ["text"]}},
                 {"id": "free/model", "name": "Free", "context_length": 64_000, "pricing": {"prompt": 0, "completion": 0}, "architecture": {"input_modalities": ["text"], "output_modalities": ["text"]}},
                 {"id": "other-free", "name": "Other Free", "context_length": 128_000, "pricing": {"prompt": 0, "completion": 0}, "architecture": {"input_modalities": ["text", "image"], "output_modalities": ["text"]}},
                 {"id": "free-audio", "name": "Audio Generator", "context_length": 16_000, "pricing": {"prompt": 0, "completion": 0}, "architecture": {"input_modalities": ["text"], "output_modalities": ["text", "audio"]}},
@@ -160,6 +161,7 @@ def test_models_are_filtered_and_cached(monkeypatch, tmp_path):
     payload = response.get_json()
     assert payload["default"] == "other-free"
     assert all(model["id"] != "paid/model" for model in payload["models"])
+    assert all(model["id"] != "unknown-price/model" for model in payload["models"])
     assert all(model["id"] != "free-audio" for model in payload["models"])
     assert any(item["id"] == "other-free" for item in payload["models"])
     model_ids = {item["id"] for item in payload["models"]}
