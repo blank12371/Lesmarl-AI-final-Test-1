@@ -36,6 +36,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('account-button').addEventListener('click', openAuth);
   document.getElementById('sign-out-button').addEventListener('click', signOut);
   document.getElementById('settings-sign-out').addEventListener('click', signOut);
+  document.getElementById('delete-all-chats').addEventListener('click', deleteAllChats);
   document.getElementById('auth-form').addEventListener('submit', submitAuth);
   document.getElementById('enhance-prompt').addEventListener('click', enhancePrompt);
   document.getElementById('accept-enhanced-prompt').addEventListener('click', acceptEnhancedPrompt);
@@ -341,6 +342,27 @@ document.addEventListener('DOMContentLoaded', () => {
     textarea.dispatchEvent(new Event('input'));
     document.getElementById('chat-panel')?.scrollTo({ top: 0 });
     textarea.focus();
+    renderConversationList();
+  }
+
+  function deleteAllChats() {
+    if (!window.confirm('Delete all saved chats from this browser? This cannot be undone.')) return;
+    window.LesmarlChat.stop();
+    conversations = [];
+    activeConversationId = null;
+    nextChatNumber = 1;
+    currentMode = 'general';
+    attachments.splice(0);
+    renderAttachments();
+    document.getElementById('messages').replaceChildren();
+    document.getElementById('empty-state').hidden = false;
+    textarea.value = '';
+    textarea.dispatchEvent(new Event('input'));
+    document.getElementById('chat-panel')?.scrollTo({ top: 0 });
+    chatSearch.value = '';
+    localStorage.removeItem('lesmarl-chat-history');
+    sessionStorage.removeItem('lesmarl-chat-history');
+    window.LesmarlUI.setModeSelection(currentMode);
     renderConversationList();
   }
 
